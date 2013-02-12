@@ -8,7 +8,7 @@
 #include <smlib>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0" 
+#define PLUGIN_VERSION "1.1" 
 
 /////////////////////////////////Credits////////////////////////////////// 
 //Amount of credits new players get 
@@ -37,7 +37,6 @@
 #define gravitycost 2 
 #define multijumpcost 1 
 
-#define flashguncost 6 
 #define realarmorcost 4 
 #define hptakercost 4 
 #define powercost 4 
@@ -52,27 +51,14 @@
 
 //////////////////////////////Max Level////////////////////////////////////// 
 
-//Max Levels for terrorests 
-#define hp_max_level_t 0 
-#define armor_max_level_t 2 //Dont raise it above 2 since CSGO's max armor is 120. Or reduce armorperbuy but meh 
-#define gravity_max_level_t 2 
-#define multijump_max_level_t 2 
-#define power_max_level_t 3 
-#define hptaker_max_level_t 4 
-#define flash_max_level_t 0 
-#define realarmor_max_level_t 0 
-#define speed_max_level_t 3 
 
-//Max Levels for counter terrorests 
-#define hp_max_level_ct 5 
-#define armor_max_level_ct 0 //Dont raise it above 2 since CSGO's max armor is 120. Or reduce armorperbuy but meh 
-#define gravity_max_level_ct 10 
-#define multijump_max_level_ct 5 
-#define power_max_level_ct 0 
-#define hptaker_max_level_ct 5 
-#define flash_max_level_ct 5 
-#define realarmor_max_level_ct 1 
-#define speed_max_level_ct 3 
+#define hp_max_level 4
+#define armor_max_level 2 //Dont raise it above 2 since CSGO's max armor is 120. Or reduce armorperbuy but meh 
+#define gravity_max_level 3
+#define multijump_max_level 4 
+#define power_max_level 3
+#define hptaker_max_level 4
+#define speed_max_level 3 
 
 
 ////////////////////////Adds Per Buy//////////////////////////////////////////// 
@@ -80,22 +66,10 @@
 #define armorperbuy 10 
 #define hpperbuy 15 
 #define gravityperbuy 0.05 //% as a decimal 
-#define FlashChance 0.03 //% as a decimal 
 new Float:speedperbuy=0.06; //% as a decimal 
 
 
 ////////////////////////Other//////////////////////////////////////////// 
-#define SHOTGUN_AIMING     32 
-#define MAX_KB_DISTANCE    500 
-#define SHOTGUN_PUSH    520.0 
-
-#define moneyforkill 4000 
-
-#define BOMB_TASK 1234 
-
-#define SECONDS_TO_SCREENFADE_UNITS(%1) ((1<<12) * (%1)) 
-
-new UserMsg:g_FadeUserMsgId; 
 
 
 //Skills 
@@ -103,23 +77,19 @@ new Armor[MAXPLAYERS+1];
 new Health[MAXPLAYERS+1]; 
 new Gravity[MAXPLAYERS+1]; 
 new SpeedLevel[MAXPLAYERS+1]; 
-new Flash[MAXPLAYERS+1]; 
 new Realarmor[MAXPLAYERS+1]; 
 new Hptaker[MAXPLAYERS+1]; 
 new Power[MAXPLAYERS+1]; 
 new multijump[MAXPLAYERS+1]; 
 new jumpnum[MAXPLAYERS+1]; 
 
-new bool:isFlashed[MAXPLAYERS+1]; 
-
 new Float:g_flBoost    = 250.0; 
 new bool:g_bDoubleJump = true; 
 new g_fLastButtons[MAXPLAYERS+1]; 
 new g_fLastFlags[MAXPLAYERS+1]; 
+ 
 
-new Float:FlashCoolDown=4.0; 
-new FlashInt=1000;  
-
+new bool:SpawnProtection[MAXPLAYERS+1];
 
 
 //Credit Arrays 
@@ -133,8 +103,8 @@ new Handle:CreditTimer[MAXPLAYERS+1];
 
 public Plugin:myinfo =  
 { 
-    name = "Rootbeer Credit Mod", 
-    author = "Arch_Angel, rewritten by Taz", 
+    name = "711 Source Credit Mod", 
+    author = "Taz", 
     description = "Credit Mod for CS:GO", 
     version = PLUGIN_VERSION, 
     url = "http://www.711clan.org", 
@@ -145,16 +115,17 @@ public OnPluginStart()
     LogMessage("Rootbeer Mod Loaded Successfully"); 
     CreditCookie = RegClientCookie("rootbeer_credits", "Amount of Credits the client has", CookieAccess_Protected); 
     CashCookie = RegClientCookie("rootbeer_cash", "Amount of Cash the client has", CookieAccess_Protected); 
-    RegConsoleCmd("sm_buy", Command_BuyCmd); 
+    RegConsoleCmd("sm_buy", Command_BuyCmd);
+    RegConsoleCmd("sm_bank", Command_BankCmd);
     RegConsoleCmd("sm_buycredits", Command_BuyCreditsCmd); 
     RegConsoleCmd("sm_credits", Command_ShowCreditsCmd); 
-    RegConsoleCmd("sm_givecredits", Command_GiveCreditsCmd); //FOR TESTING. This gives everyone on the server 100 credits, and is not an admin command. 
+    RegConsoleCmd("sm_givecreditsall", Command_GiveCreditsAllCmd); //FOR TESTING. This gives everyone on the server 100 credits, and is not an admin command.
+    //RegAdminCmd("sm_givecredits", Command_GiveCreditsCmd, ADMFLAG_CHANGEMAP, "Syntax: sm_givecredits <SteamID> <amount>");
     HookEvent("player_death", event_death); 
     HookEvent("player_spawn", event_PlayerSpawn); 
     HookEvent("item_equip", event_itemEquip); 
     HookEvent("player_team", Event_OnPlayerTeam, EventHookMode_Pre); 
     HookEvent("round_start", event_roundStart); 
-    g_FadeUserMsgId = GetUserMessageId("Fade"); 
 } 
 
 public OnClientPutInServer(client)  
@@ -171,6 +142,8 @@ public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 { 
     new client = GetClientOfUserId(GetEventInt(event, "userid")); 
     CreateTimer(0.1, timer_PlayerSpawn, client); 
+    SpawnProtection[client] = true;
+    CreateTimer(3.0, timer_protectionOff, client);
 } 
 
 public event_roundStart(Handle:event, const String:name[], bool:dontBroadcast) 
@@ -179,13 +152,24 @@ public event_roundStart(Handle:event, const String:name[], bool:dontBroadcast)
 } 
 
 public Action:timer_PlayerSpawn(Handle:timer, any:client) 
-{ 
-    SetEntData(client, FindDataMapOffs(client, "m_iMaxHealth"), 500, 4, true); 
-    new ihp = ((Health[client]*hpperbuy)+100); 
-    SetEntData(client, FindDataMapOffs(client, "m_iHealth"), ihp, 4, true); 
-     
-    SetEntPropFloat(client, Prop_Send, "m_flLaggedMovementValue", (speedperbuy*SpeedLevel[client])+1); 
+{
+    if (IsValidClient(client))
+    {
+        SetEntData(client, FindDataMapOffs(client, "m_iMaxHealth"), 500, 4, true); 
+        new ihp = ((Health[client]*hpperbuy)+100); 
+        SetEntData(client, FindDataMapOffs(client, "m_iHealth"), ihp, 4, true); 
+        
+        SetEntPropFloat(client, Prop_Send, "m_flLaggedMovementValue", (speedperbuy*SpeedLevel[client])+1); 
+    }
 } 
+
+public Action:timer_protectionOff(Handle:timer, any:client) 
+{
+    if (IsValidClient(client))
+    {
+        SpawnProtection[client] = false;
+    }
+}
 
 public event_itemEquip(Handle:event, const String:name[], bool:dontBroadcast) 
 { 
@@ -201,31 +185,7 @@ public Action:Event_OnPlayerTeam(Handle:event, const String:name[], bool:dontBro
     new client = GetClientOfUserId(GetEventInt(event, "userid")); 
     if(client <= 0 || !IsClientInGame(client)) 
         return Plugin_Continue; 
-    new newteam = GetEventInt(event, "team"); 
-    if (newteam==2) //Terrorist 
-    { 
-        if (Armor[client] > armor_max_level_t) Armor[client] = armor_max_level_t; 
-        if (Health[client] > hp_max_level_t) Health[client] = hp_max_level_t; 
-        if (SpeedLevel[client] > speed_max_level_ct) SpeedLevel[client] = speed_max_level_ct; 
-        if (Gravity[client] > gravity_max_level_t) Gravity[client] = gravity_max_level_t; 
-        if (Flash[client] > flash_max_level_t) Flash[client] = flash_max_level_t; 
-        if (Realarmor[client] > realarmor_max_level_t) Realarmor[client] = realarmor_max_level_t; 
-        if (Hptaker[client] > hptaker_max_level_t) Hptaker[client] = hptaker_max_level_t; 
-        if (Power[client] > power_max_level_t) Power[client] = power_max_level_t; 
-        if (multijump[client] > multijump_max_level_t) multijump[client] = multijump_max_level_t; 
-    } 
-    else if (newteam==3) //CT 
-    { 
-        if (Armor[client] > armor_max_level_ct) Armor[client] = armor_max_level_ct; 
-        if (Health[client] > hp_max_level_ct) Health[client] = hp_max_level_ct; 
-        if (SpeedLevel[client] > speed_max_level_ct) SpeedLevel[client] = speed_max_level_ct; 
-        if (Gravity[client] > gravity_max_level_ct) Gravity[client] = gravity_max_level_ct; 
-        if (Flash[client] > flash_max_level_ct) Flash[client] = flash_max_level_ct; 
-        if (Realarmor[client] > realarmor_max_level_ct) Realarmor[client] = realarmor_max_level_ct; 
-        if (Hptaker[client] > hptaker_max_level_ct) Hptaker[client] = hptaker_max_level_ct; 
-        if (Power[client] > power_max_level_ct) Power[client] = power_max_level_ct; 
-        if (multijump[client] > multijump_max_level_ct) multijump[client] = multijump_max_level_ct; 
-    } 
+    CreateTimer(2.0, RespawnPlayer, client);
     return Plugin_Continue; 
 } 
 
@@ -271,7 +231,12 @@ SetClientCash(client, cash)
     decl String:strPoints[32]; 
     IntToString(cash, strPoints, sizeof(strPoints)); 
     SetClientCookie(client, CashCookie, strPoints); 
-} 
+}
+
+public Action:Command_BankCmd(client, args)
+{
+    Bank(client);
+}
 
 public Action:Command_BuyCreditsCmd(client, args) 
 { 
@@ -284,7 +249,7 @@ public Action:Command_ShowCreditsCmd(client, args)
     PrintToChat(client, "You have %i Credits", credits); 
 } 
 
-public Action:Command_GiveCreditsCmd(client,args) 
+public Action:Command_GiveCreditsAllCmd(client,args) 
 { 
     for (new i = 1; i <= MaxClients; i++) 
     { 
@@ -297,53 +262,50 @@ public Action:Command_GiveCreditsCmd(client,args)
             } 
         } 
     } 
-} 
+}
+
+/*public Action:Command_GiveCreditsCmd(client,args)
+{
+    if (GetCmdArgs() != 2)
+    {
+        PrintToChat(client, "Syntax: sm_givecredits <SteamID> <amount>");
+        PrintToConsole(client, "Syntax: sm_givecredits <SteamID> <amount>");
+    }
+    new String:id[64];
+    new String:str[64];
+    GetCmdArg(1, id, sizeof(id));
+    GetCmdArg(2, amt, sizeof(str));
+    new amount = StringToInt(str);
+    //new credits = GetAuthIdCookie(id, CreditCookie) would go here
+    SetAuthIdCookie(id, CreditCookie, credits+amount);
+}*/
 
 public Action:NewRound(Handle:hTimer) 
-{ 
+{
     for (new i = 1; i <= MaxClients; i++) 
     { 
         if(IsClientConnected(i)) 
         { 
-            if((GetClientTeam(i)) == 2) 
+            if(Armor[i] > armor_max_level) Armor[i] = armor_max_level; 
+            if(Health[i] > hp_max_level) Health[i] = hp_max_level; 
+            if(Gravity[i] > gravity_max_level) Gravity[i] = gravity_max_level; 
+            if(Hptaker[i] > hptaker_max_level) Hptaker[i] = hptaker_max_level; 
+            if(Power[i] > power_max_level) Power[i] = power_max_level; 
+            if(multijump[i] > multijump_max_level) multijump[i] = multijump_max_level;         
+        } 
+        if(IsPlayerAlive(i)) 
+        { 
+            if(Armor[i] > 0) 
             { 
-                if(Armor[i] > armor_max_level_t) Armor[i] = armor_max_level_t; 
-                if(Health[i] > hp_max_level_t) Health[i] = hp_max_level_t; 
-                if(Gravity[i] > gravity_max_level_t) Gravity[i] = gravity_max_level_t; 
-                if(Flash[i] > flash_max_level_t) Flash[i] = flash_max_level_t; 
-                if(Realarmor[i] > realarmor_max_level_t) Realarmor[i] = realarmor_max_level_t; 
-                if(Hptaker[i] > hptaker_max_level_t) Hptaker[i] = hptaker_max_level_t; 
-                if(Power[i] > power_max_level_t) Power[i] = power_max_level_t; 
-                if(multijump[i] > multijump_max_level_t) multijump[i] = multijump_max_level_t;     
+                UserArmor(i); 
             } 
-             
-            if(GetClientTeam(i) == 3) 
+            if(Health[i] > 0) 
             { 
-                if(Armor[i] > armor_max_level_ct) Armor[i] = armor_max_level_ct; 
-                if(Health[i] > hp_max_level_ct) Health[i] = hp_max_level_ct; 
-                if(Gravity[i] > gravity_max_level_ct) Gravity[i] = gravity_max_level_ct; 
-                if(Flash[i] > flash_max_level_t) Flash[i] = flash_max_level_ct; 
-                if(Realarmor[i] > realarmor_max_level_ct) Realarmor[i] = realarmor_max_level_ct; 
-                if(Hptaker[i] > hptaker_max_level_ct) Hptaker[i] = hptaker_max_level_ct; 
-                if(Power[i] > power_max_level_ct) Power[i] = power_max_level_ct; 
-                if(multijump[i] > multijump_max_level_ct) multijump[i] = multijump_max_level_ct; 
+                UserHealth(i); 
             } 
-             
-             
-            if(IsPlayerAlive(i)) 
+            if(Gravity[i] > 0) 
             { 
-                if(Armor[i] > 0) 
-                { 
-                    UserArmor(i); 
-                } 
-                if(Health[i] > 0) 
-                { 
-                    UserHealth(i); 
-                } 
-                if(Gravity[i] > 0) 
-                { 
-                    UserGravity(i); 
-                } 
+                UserGravity(i); 
             } 
         } 
     } 
@@ -454,50 +416,17 @@ stock ReJump(const any:client)
 } 
 
 public Action:OnTakeDamage(client, &attacker, &inflictor, &Float:damage, &damagetype, &weapon, Float:damageForce[3], Float:damagePosition[3]) 
-{ 
+{
+    if (SpawnProtection[client] == true)
+        return Plugin_Handled;
+        
     if (attacker > 0 && attacker < MAXPLAYERS && IsClientInGame(attacker) && Power[attacker] > 0 && IsPlayerAlive(client)) 
     { 
         damage *= ((0.03 * Power[attacker])+1); 
         return Plugin_Changed; 
     } 
-    if (attacker > 0 && attacker < MAXPLAYERS && (!IsFakeClient(client)) && IsPlayerAlive(client) && (!isFlashed[client])) 
-    { 
-        if (GetRandomInt(1, 100) <= (FlashChance*Flash[attacker]*100)) 
-        { 
-            new clients[2]; 
-            clients[0] = client; 
-            new Handle:message = StartMessageEx(g_FadeUserMsgId, clients, 1); 
-            new flags = 0x0001; 
-            new color[4] = { 255, 255, 255, 255 }; //White. Change the RGBA values for different colors. 
-            if (GetUserMessageType() == UM_Protobuf) 
-            { 
-                PbSetInt(message, "duration", FlashInt); 
-                PbSetInt(message, "hold_time", FlashInt); 
-                PbSetInt(message, "flags", flags); 
-                PbSetColor(message, "clr", color); 
-            } 
-            else 
-            { 
-                BfWriteShort(message, FlashInt); 
-                BfWriteShort(message, FlashInt); 
-                BfWriteShort(message, flags); 
-                BfWriteByte(message, color[0]); 
-                BfWriteByte(message, color[1]); 
-                BfWriteByte(message, color[2]); 
-                BfWriteByte(message, color[3]); 
-            } 
-            EndMessage(); 
-            isFlashed[client] = true; 
-            CreateTimer(FlashCoolDown, UnFlashed, client); 
-        } 
-    } 
     return Plugin_Continue; 
-} 
-
-public Action:UnFlashed(Handle:timer, any:client) 
-{ 
-    isFlashed[client] = false; 
-} 
+}
 
 public Action:event_death(Handle:event, const String:name[], bool:dontBroadcast) 
 { 
@@ -570,283 +499,155 @@ public MenuHandler_Main(Handle:menu, MenuAction:action, param1, param2)
     { 
         CloseHandle(menu); 
     } 
-} 
-     
+}
 
-public Action:Menu_Skills(client) 
-{ 
-    new team=GetClientTeam(client); 
-    if (team==2)//terrorist 
-        Menu_Skills_T(client); 
-    if (team==3)//CT 
-        Menu_Skills_CT(client); 
-    return Plugin_Continue; 
-} 
-
-public Action:Menu_Skills_T(client) 
-{ 
+public Action:Menu_Skills(client)
+{
     new credits=GetClientCredits(client); 
     { 
         new Handle:menu = CreatePanel(); 
         new String:s[512]; 
         Format(s, 512, "Skills - You have %i Credits",credits); 
         SetPanelTitle(menu, s); 
-        Format(s, 512, "Armor (Cost: %d Credit) %i/%d", armorcost, Armor[client]/1, armor_max_level_t); 
+        Format(s, 512, "Health (Cost: %d Credit) %i/%d", hpcost,Health[client]/1,hp_max_level); 
+        DrawPanelItem(menu, s);
+        Format(s, 512, "Armor (Cost: %d Credit) %i/%d", armorcost, Armor[client]/1, armor_max_level); 
         DrawPanelItem(menu, s); 
-        Format(s, 512, "Speed (Cost: %d Credit) %i/%d", speedcost, SpeedLevel[client]/1,speed_max_level_t); 
+        Format(s, 512, "Speed (Cost: %d Credit) %i/%d", speedcost, SpeedLevel[client]/1,speed_max_level); 
         DrawPanelItem(menu, s); 
-        Format(s, 512, "Gravity (Cost: %d Credit) %i/%d", gravitycost, Gravity[client]/1, gravity_max_level_t); 
+        Format(s, 512, "Gravity (Cost: %d Credit) %i/%d", gravitycost, Gravity[client]/1, gravity_max_level); 
         DrawPanelItem(menu, s); 
-        Format(s, 512, "Mutlijump (Cost: %d Credit) %i/%d", multijumpcost, multijump[client]/1, multijump_max_level_t);         
+        Format(s, 512, "Mutlijump (Cost: %d Credit) %i/%d", multijumpcost, multijump[client]/1, multijump_max_level);         
         DrawPanelItem(menu, s); 
-        Format(s, 512, "HP Consumer (Cost: %d Credit) %i/%d", hptakercost,Hptaker[client]/1, hptaker_max_level_t); 
+        Format(s, 512, "Power (Cost: %d Credit) %i/%d", powercost,Power[client]/1, power_max_level); 
         DrawPanelItem(menu, s); 
-        Format(s, 512, "Power (Cost: %d Credit) %i/%d", powercost,Power[client]/1, power_max_level_t); 
+        Format(s, 512, "HP Consumer (Cost: %d Credit) %i/%d", hptakercost,Hptaker[client]/1, hptaker_max_level); 
         DrawPanelItem(menu, s); 
         DrawPanelItem(menu, "Cancel"); 
         DrawPanelItem(menu, "Back",ITEMDRAW_CONTROL); 
-        SendPanelToClient(menu, client,MenuHandler_Skills_T, 20); 
+        SendPanelToClient(menu, client, MenuHandler_Skills, 20); 
         CloseHandle(menu); 
     } 
     return Plugin_Handled; 
-} 
+}
 
-public MenuHandler_Skills_T(Handle:menu, MenuAction:action, param1, param2) 
-{ 
+public MenuHandler_Skills(Handle:menu, MenuAction:action, param1, param2) 
+{
     if (action == MenuAction_Select) 
     { 
         new credits=GetClientCredits(param1); 
         switch (param2) 
         { 
             case 1: 
-            { 
-                if(credits < armorcost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Armor[param1] == armor_max_level_t) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if((credits) >= armorcost && Armor[param1] < armor_max_level_t) 
-                { 
-                    Armor[param1]++; 
-                    UserArmor(param1); 
-                    SetClientCredits(param1, (credits -= armorcost)); 
-                    PrintToChat(param1, "[711UPC] Armor increased by %i",10*Armor[param1]/1); 
-                } 
-                Menu_Skills_T(param1); 
-            } 
-            case 2: 
-            { 
-                if(credits < speedcost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(SpeedLevel[param1] == speed_max_level_t) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= speedcost && SpeedLevel[param1] < speed_max_level_t) 
-                { 
-                    SpeedLevel[param1]++; 
-                    UserSpeed(param1); 
-                    SetClientCredits(param1, (credits -= speedcost)); 
-                    PrintToChat(param1, "[711UPC] You now run faster at level %i",SpeedLevel[param1]/1); 
-                } 
-                Menu_Skills_T(param1); 
-            } 
-            case 3: 
-            { 
-                if(credits < gravitycost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Gravity[param1] == gravity_max_level_t) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= gravitycost && Gravity[param1] < gravity_max_level_t) 
-                { 
-                    Gravity[param1]++; 
-                    UserGravity(param1); 
-                    SetClientCredits(param1, (credits -= gravitycost)); 
-                    PrintToChat(param1, "[711UPC] You now jump higher at level %i",Gravity[param1]/1); 
-                } 
-                Menu_Skills_T(param1); 
-            } 
-            case 4: 
-            { 
-                if(credits < multijumpcost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(multijump[param1] == multijump_max_level_t) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= multijumpcost && multijump[param1] < multijump_max_level_t) 
-                { 
-                    multijump[param1]++; 
-                    SetClientCredits(param1, (credits -= multijumpcost)); 
-                    PrintToChat(param1, "[711UPC] You now can jump in the air %i times",multijump[param1]/1); 
-                } 
-                Menu_Skills_T(param1); 
-            } 
-            case 5: 
-            { 
-                if(credits < hptakercost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Hptaker[param1] == hptaker_max_level_t) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= hptakercost && Hptaker[param1] < hptaker_max_level_t) 
-                { 
-                    Hptaker[param1]++; 
-                    SetClientCredits(param1, (credits -= hptakercost)); 
-                    PrintToChat(param1, "[711UPC] HP added per kill %i", (5*Hptaker[param1])); 
-                } 
-                Menu_Skills_T(param1); 
-            } 
-            case 6: 
-            { 
-                if(credits < powercost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Power[param1] == power_max_level_t) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= powercost && Power[param1] < power_max_level_t) 
-                { 
-                    Power[param1]++; 
-                    SetClientCredits(param1, (credits -= powercost)); 
-                    PrintToChat(param1, "[711UPC] You are level %i you do more damage",Power[param1]); 
-                } 
-                Menu_Skills_T(param1); 
-            } 
-            default: 
-            { 
-                return; 
-            }     
-        } 
-    } 
-    else if (action == MenuAction_End) 
-    { 
-        CloseHandle(menu); 
-    } 
-} 
-
-public Action:Menu_Skills_CT(client) 
-{ 
-    new credits=GetClientCredits(client); 
-    { 
-        new Handle:menu = CreatePanel(); 
-        new String:s[512]; 
-        Format(s, 512, "Skills - You have %i Credits",credits); 
-        SetPanelTitle(menu, s); 
-        Format(s, 512, "Health (Cost: %d Credit) %i/%d", hpcost,Health[client]/1,hp_max_level_ct); 
-        DrawPanelItem(menu, s); 
-        Format(s, 512, "Speed (Cost: %d Credit) %i/%d", speedcost, SpeedLevel[client]/1,speed_max_level_ct); 
-        DrawPanelItem(menu, s); 
-        Format(s, 512, "Gravity (Cost: %d Credit) %i/%d", gravitycost, Gravity[client]/1, gravity_max_level_ct); 
-        DrawPanelItem(menu, s); 
-        Format(s, 512, "Mutlijump (Cost: %d Credit) %i/%d", multijumpcost, multijump[client]/1, multijump_max_level_ct);         
-        DrawPanelItem(menu, s); 
-        Format(s, 512, "HP Consumer (Cost: %d Credit) %i/%d", hptakercost,Hptaker[client]/1, hptaker_max_level_ct); 
-        DrawPanelItem(menu, s); 
-        Format(s, 512, "Flash Gun (Cost: %d Credit) %i/%d", flashguncost,Flash[client]/1,flash_max_level_ct); 
-        DrawPanelItem(menu, s); 
-        DrawPanelItem(menu, "Cancel"); 
-        DrawPanelItem(menu, "Back",ITEMDRAW_CONTROL); //9  (0) 
-        SendPanelToClient(menu, client,MenuHandler_Skills_CT, 20); 
-        CloseHandle(menu); 
-    } 
-    return Plugin_Handled; 
-} 
-
-public MenuHandler_Skills_CT(Handle:menu, MenuAction:action, param1, param2) 
-{ 
-    if (action == MenuAction_Select) 
-    { 
-        new credits=GetClientCredits(param1); 
-        switch (param2) 
-        { 
-            case 1: 
-            { 
+            {
                 if(credits < hpcost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Health[param1] == hp_max_level_ct) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= hpcost && Health[param1] < hp_max_level_ct) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(Health[param1] == hp_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if(credits >= hpcost && Health[param1] < hp_max_level) 
                 { 
                     Health[param1]++; 
                     UserHealth(param1); 
                     SetClientCredits(param1, (credits -= hpcost)); 
-                    PrintToChat(param1, "[711UPC] HP increased by %i",20*Health[param1]/1); 
+                    PrintToChat(param1, "[711] HP increased"); 
                 } 
-                Menu_Skills_CT(param1); 
-            } 
+                Menu_Skills(param1); 
+            }
             case 2: 
             { 
+                if(credits < armorcost) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(Armor[param1] == armor_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if((credits) >= armorcost && Armor[param1] < armor_max_level) 
+                { 
+                    Armor[param1]++; 
+                    UserArmor(param1); 
+                    SetClientCredits(param1, (credits -= armorcost)); 
+                    PrintToChat(param1, "[711] Armor increased"); 
+                } 
+                Menu_Skills(param1); 
+            } 
+            case 3: 
+            { 
                 if(credits < speedcost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(SpeedLevel[param1] == speed_max_level_ct) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= speedcost && SpeedLevel[param1] < speed_max_level_ct) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(SpeedLevel[param1] == speed_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if(credits >= speedcost && SpeedLevel[param1] < speed_max_level) 
                 { 
                     SpeedLevel[param1]++; 
                     UserSpeed(param1); 
                     SetClientCredits(param1, (credits -= speedcost)); 
-                    PrintToChat(param1, "[711UPC] You now run faster at level %i",SpeedLevel[param1]/1); 
+                    PrintToChat(param1, "[711] You now run faster"); 
                 } 
-                Menu_Skills_CT(param1); 
+                Menu_Skills(param1); 
             } 
-            case 3: 
+            case 4: 
             { 
                 if(credits < gravitycost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Gravity[param1] == gravity_max_level_ct) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= gravitycost && Gravity[param1] < gravity_max_level_ct) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(Gravity[param1] == gravity_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if(credits >= gravitycost && Gravity[param1] < gravity_max_level) 
                 { 
                     Gravity[param1]++; 
                     UserGravity(param1); 
                     SetClientCredits(param1, (credits -= gravitycost)); 
-                    PrintToChat(param1, "[711UPC] You now jump higher at level %i",Gravity[param1]/1); 
+                    PrintToChat(param1, "[711] You now jump higher"); 
                 } 
-                Menu_Skills_CT(param1); 
-            } 
-            case 4: 
-            { 
-                if(credits < multijumpcost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(multijump[param1] == multijump_max_level_ct) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= multijumpcost && multijump[param1] < multijump_max_level_ct) 
-                { 
-                    multijump[param1]++; 
-                    SetClientCredits(param1, (credits -= multijumpcost)); 
-                    PrintToChat(param1, "[711UPC] You now can jump in the air %i times",multijump[param1]/1); 
-                } 
-                Menu_Skills_CT(param1); 
+                Menu_Skills(param1); 
             } 
             case 5: 
             { 
+                if(credits < multijumpcost) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(multijump[param1] == multijump_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if(credits >= multijumpcost && multijump[param1] < multijump_max_level) 
+                { 
+                    multijump[param1]++; 
+                    SetClientCredits(param1, (credits -= multijumpcost)); 
+                    PrintToChat(param1, "[711] You now can jump in the air %i times",multijump[param1]/1); 
+                } 
+                Menu_Skills(param1); 
+            }
+            case 6: 
+            { 
+                if(credits < powercost) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(Power[param1] == power_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if(credits >= powercost && Power[param1] < power_max_level) 
+                { 
+                    Power[param1]++; 
+                    SetClientCredits(param1, (credits -= powercost)); 
+                    PrintToChat(param1, "[711] You now deal more damage"); 
+                } 
+                Menu_Skills(param1); 
+            }
+            case 7: 
+            { 
                 if(credits < hptakercost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Hptaker[param1] == hptaker_max_level_ct) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= hptakercost && Hptaker[param1] < hptaker_max_level_ct) 
+                    PrintToChat(param1, "[711] Insufficient credits"); 
+                if(Hptaker[param1] == hptaker_max_level) 
+                    PrintToChat(param1, "[711] Max level reached"); 
+                if(credits >= hptakercost && Hptaker[param1] < hptaker_max_level) 
                 { 
                     Hptaker[param1]++; 
                     SetClientCredits(param1, (credits -= hptakercost)); 
-                    PrintToChat(param1, "[711UPC] HP added per kill %i", (5*Hptaker[param1])); 
+                    PrintToChat(param1, "[711] %i HP added per kill", (5*Hptaker[param1])); 
                 } 
-                Menu_Skills_CT(param1); 
-            } 
-            case 6: 
-            { 
-                if(credits < flashguncost) 
-                    PrintToChat(param1, "[711UPC] Insufficient credits"); 
-                if(Flash[param1] == flash_max_level_ct) 
-                    PrintToChat(param1, "[711UPC] Max level reached"); 
-                if(credits >= flashguncost && Flash[param1] < flash_max_level_ct) 
-                { 
-                    Flash[param1]++; 
-                    SetClientCredits(param1, (credits -= flashguncost)); 
-                    PrintToChat(param1, "[711UPC] You have %i Precent chance of Flashing your enemy when you do damage", FlashChance*Flash[param1]*100); 
-                } 
-                Menu_Skills_CT(param1); 
-            } 
+                Menu_Skills(param1); 
+            }
             default: 
             { 
                 return; 
             }     
         } 
-    } 
-    else if (action == MenuAction_End) 
-    { 
+    }
+    else if (action == MenuAction_End)
+    {
         CloseHandle(menu); 
     } 
 } 
@@ -878,41 +679,41 @@ public BankMenu(Handle:menu, MenuAction:action, param1, param2)
     new iMoney = GetEntData(param1,iAccount,4); 
     new bankcash = GetClientCash(param1); 
     if (action == MenuAction_Select) 
-    { 
+    {
         switch (param2) 
-        { 
+        {
             case 1: 
-            { 
-                SetClientCash(param1, (bankcash += iMoney)); 
+            {
+                SetClientCash(param1, (bankcash + iMoney));
+                SetEntData(param1, iAccount, 0, 4, true);
                 Bank(param1); 
             } 
             case 2: 
             { 
                 if (iMoney<9000) 
-                { 
-                    if (bankcash<10000) 
+                {
+                    if (bankcash >=1000) 
                     { 
+                        SetEntData(param1, iAccount, (iMoney + 1000), 4, true); 
+                        SetClientCash(param1, (bankcash - 1000)); 
+                        Bank(param1); 
+                    } 
+                    else
+                    {
                         PrintToChat(param1, "Insufficient Funds!"); 
-                        Bank(param1); 
-                    } 
-                    if (bankcash>9999) 
-                    { 
-                        SetEntData(param1, iMoney, bankcash += 10000,4); 
-                        SetClientCash(param1, (bankcash -= 10000)); 
-                        Bank(param1); 
-                    } 
-                } 
-                else 
-                { 
+                        Bank(param1);
+                    }
+                }
+                else
+                {
                     PrintToChat(param1, "You can't hold any more money"); 
-                    Bank(param1); 
-                } 
-                 
-            } 
+                    Bank(param1);
+                }
+            }
             case 3: 
                 return; 
-        } 
-    } 
+        }
+    }
 } 
 
 public OnClientDisconnect(client) 
@@ -921,7 +722,6 @@ public OnClientDisconnect(client)
     Health[client] = 0; 
     Gravity[client] = 0; 
     SpeedLevel[client] = 0; 
-    Flash[client] = 0; 
     Realarmor[client] = 0; 
     Hptaker[client] = 0; 
     Power[client] = 0; 
@@ -955,4 +755,4 @@ stock SetClientDeaths( index, deaths )
 { 
     SetEntProp( index, Prop_Data, "m_iDeaths", deaths ); 
     return 1; 
-}
+}  
